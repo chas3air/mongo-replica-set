@@ -1,0 +1,78 @@
+services:
+  mongodb1:
+    image: mongo:latest
+    container_name: mongodb1
+    command: ["mongod", "--bind_ip_all", "--replSet", "rs0"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data1:/data/db
+
+  mongodb2:
+    image: mongo:latest
+    container_name: mongodb2
+    command: ["mongod", "--bind_ip_all", "--replSet", "rs0"]
+    volumes:
+      - mongo-data2:/data/db
+    networks:
+      - mongo-net
+
+  mongodb3:
+    image: mongo:latest
+    container_name: mongodb3
+    command: ["mongod", "--bind_ip_all", "--replSet", "rs0"]
+    volumes:
+      - mongo-data3:/data/db
+    networks:
+      - mongo-net
+
+  mongodb4:
+    image: mongo:latest
+    container_name: mongodb4
+    command: ["mongod", "--bind_ip_all", "--replSet", "rs0"]
+    volumes:
+      - mongo-data4:/data/db
+    networks:
+      - mongo-net
+
+  mongo-arbiter:
+    image: mongo:latest
+    container_name: mongo-arbiter
+    command: ["mongod", "--bind_ip_all", "--replSet", "rs0", "--port", "27018"]
+
+  mongo-init:
+    image: mongo:latest
+    container_name: mongo-init
+    depends_on:
+      - mongodb1
+      - mongodb2
+      - mongodb3
+      - mongodb4
+      - mongo-arbiter
+    volumes: 
+      - ./mongo_rs_init.sh:/scripts/mongo_rs_init.sh 
+    entrypoint: ["/scripts/mongo_rs_init.sh"]
+
+  haproxy:
+    image: haproxy:latest
+    container_name: haproxy
+    ports: 
+      - "27018:27018" # MongoDB read-balancer 
+      - "8404:8404" # HAProxy stats UI
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg
+    depends_on:
+      - mongodb2
+      - mongodb3
+      - mongodb4
+
+volumes:
+  mongo-data1:
+  mongo-data2:
+  mongo-data3:
+  mongo-data4:
+
+
+networks:
+  mongo-net:
+    driver: bridge
