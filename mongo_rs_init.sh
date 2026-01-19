@@ -2,13 +2,14 @@
 set -e
 
 HOSTS=("mongodb1" "mongodb2" "mongodb3" "mongodb4" "mongo-arbiter")
-PORT=27017
-ARBITER_PORT=27018
+PORT=$MONGO_PORT #27017
+ARBITER_PORT=$MONGO_ARBITER_PORT #27018
 
 USER="${MONGO_INITDB_ROOT_USERNAME}"
 PASS="${MONGO_INITDB_ROOT_PASSWORD}"
-RS_NAME="rs0"
-TIMEOUT=10
+RS_NAME=${MONGO_REPLICA_SET} # rs0
+TIMEOUT=${MONGO_TIMEOUT} # 10
+
 
 echo "Waiting for MongoDB nodes to respond..."
 
