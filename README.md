@@ -1,49 +1,49 @@
 # MongoDB Replica Set Infrastructure Documentation
 
-Данная документация описывает архитектуру и процесс развертывания отказоустойчивого кластера **MongoDB Replica Set** с автоматической инициализацией и балансировкой нагрузки через **HAProxy**.
+This documentation describes the architecture and deployment process for a fault-tolerant **MongoDB Replica Set** cluster with automatic initialization and load balancing via **HAProxy**.
 
-## Архитектура системы
+## System Architecture
 
-Кластер состоит из следующих компонентов:
+The cluster consists of the following components:
 
-* **4 узла данных** (`mongodb1` - `mongodb4`): Полноценные члены реплика-сета.
-* **1 Арбитр** (`mongo-arbiter`): Узел без данных, используемый только для голосования при выборе Primary.
-* **HAProxy**: Балансировщик, разделяющий потоки на чтение и запись.
-* **Mongo-init**: Контейнер-инициализатор, выполняющий первичную настройку кластера.
-* **Go-app**: Клиентское приложение.
+* **4 data nodes** (`mongodb1` - `mongodb4`): Full members of the replica set.
+* **1 Arbiter** (`mongo-arbiter`): A node without data, used only for voting when selecting the Primary.
+* **HAProxy**: A balancer that separates read and write streams.
+* **Mongo-init**: An initializer container that performs the initial configuration of the cluster.
+* **Go-app**: Client application.
 
 ---
 
-## Конфигурация (Environment Variables)
+## Configuration (Environment Variables)
 
-Параметры в файле `.env`:
+Parameters in the `.env` file:
 
-| Переменная | Описание |
+| Variable | Description |
 | --- | --- |
-| `MONGO_INITDB_ROOT_USERNAME` | Администратор (root) базы данных. |
-| `MONGO_INITDB_ROOT_PASSWORD` | Пароль администратора. |
-| `MONGO_REPLICA_SET` | Имя набора реплик (по умолчанию `rs0`). |
-| `MONGO_PORT` | Внутренний порт узлов данных (27017). |
-| `MONGO_ARBITER_PORT` | Порт арбитра (27018). |
-| `MONGO_KEYFILE_PATH` | Путь к файлу аутентификации внутри контейнера. |
+| `MONGO_INITDB_ROOT_USERNAME` | Database administrator (root). |
+| `MONGO_INITDB_ROOT_PASSWORD` | Administrator password. |
+| `MONGO_REPLICA_SET` | Name of the replica set (default `rs0`). |
+| `MONGO_PORT` | Internal port of data nodes (27017). |
+| `MONGO_ARBITER_PORT` | Arbitrator port (27018). |
+| `MONGO_KEYFILE_PATH` | Path to the authentication file inside the container. |
 
 ---
 
-## Безопасность
+## Security
 
-1. **RBAC**: Доступ защищен логином и паролем root-пользователя.
-2. **Internal Auth**: Используется `keyFile` (`mongodb.key`). Это необходимо для того, чтобы узлы реплика-сета могли доверять друг другу.
+1. **RBAC**: Access is protected by the root user's login and password.
+2. **Internal Auth**: Uses `keyFile` (`mongodb.key`). This is necessary so that replica set nodes can trust each other.
 
 ---
 
-## 1. Запуск кластера
+## 1. Starting the cluster
 
-* ### 1. Создать переменные среды
+* ### 1. Create environment variables
 ```bash
 cp .env .example.env
 ```
 
-* ### 2. Создать ключ *mongodb.key*
+* ### 2. Create the *mongodb.key* key
 
 ```bash
 openssl rand -base64 754 > mongodb.key
@@ -51,64 +51,64 @@ chmod 600 mongodb.key
 sudo chown 999:999 mongodb.key
 ```
 
-* ### 3. Запустить кластер
+* ### 3. Start the cluster
 
 ```bash
 docker-compose up --build
 ```
 
-## 2. Остановка кластера
+## 2. Stop the cluster
 
-`Ctrl + C`
+1. `Ctrl + C`
 
+2.
 ```bash
 docker compose down -v
 ```
 
 ---
 
-## ⚖️ Балансировка (HAProxy)
+## ⚖️ Load balancing (HAProxy)
 
-HAProxy предоставляет единую точку входа для приложения, разделяя порты по типу операций:
+HAProxy provides a single entry point for the application, separating ports by operation type:
 
-| Внешний порт | Тип трафика | Логика |
+| External port | Traffic type | Logic |
 | --- | --- | --- |
-| **27019** | **Write (Запись)** | Направляет только на `mongodb1` (по умолчанию Primary). |
-| **27018** | **Read (Чтение)** | Балансировка Round-robin между `mongodb2`, `mongodb3`, `mongodb4`. |
-| **8404** | **Stats** | Статистика работы (логин: `admin`, пароль: `password`). |
+| **27019** | **Write** | Directs only to `mongodb1` (Primary by default). |
+| **27018** | **Read** | Round-robin balancing between `mongodb2`, `mongodb3`, `mongodb4`. |
+| **8404** | **Stats** | Performance statistics (login: `admin`, password: `password`). |
 
-> **Примечание:** В данной конфигурации HAProxy настроен статично. Если `mongodb1` выйдет из строя и Primary станет другой узел, порт записи `27019` потребует ручного переключения в `haproxy.cfg`.
+> **Note:** In this configuration, HAProxy is configured statically. If `mongodb1` fails and another node becomes Primary, the write port `27019` will need to be manually switched in `haproxy.cfg`.
 
 ---
 
-## 🛠 Обслуживание и мониторинг
+## 🛠 Maintenance and monitoring
 
-### Проверка статуса из консоли
+### Checking status from the console
 
 ```bash
-docker exec -it mongodb1 mongosh -u root -p example --eval "rs.status()"
-
+docker exec -it mongodb1 mongosh -u root -p example --eval “rs.status()”
 ```
 
-### Проверка состояния балансировщика
+### Checking balancer status
 
-Доступна через веб-интерфейс: `http://localhost:8404/stats`
-
----
-
-## 7. Взаимодействие из приложения (Go)
-
-Для работы с кластером используется официальный драйвер `go-mongodb-driver`. В данной архитектуре реализовано разделение соединений на уровне приложения для оптимизации нагрузки.
-
-### Логика подключения
-
-Приложение создает два отдельных клиента (или пула соединений):
-
-1. **Write Client**: Подключается к порту `27019` (HAProxy → Primary). Используется для всех операций изменения данных (`Insert`, `Update`, `Delete`).
-2. **Read Client**: Подключается к порту `27018` (HAProxy → Secondaries). Используется для запросов выборки (`Find`, `Aggregate`) с параметром `readPreference=secondary`.
+Available via the web interface: `http://localhost:8404/stats`
 
 ---
 
-**Документация актуальна на:** 2026 год.
+## 7. Interaction from the application (Go)
+
+The official `go-mongodb-driver` driver is used to work with the cluster. In this architecture, connections are split at the application level to optimize the load.
+
+### Connection logic
+
+The application creates two separate clients (or connection pools):
+
+1. **Write Client**: Connects to port `27019` (HAProxy → Primary). Used for all data modification operations (`Insert`, `Update`, `Delete`).
+2. **Read Client**: Connects to port `27018` (HAProxy → Secondaries). Used for selection queries (`Find`, `Aggregate`) with the `readPreference=secondary` parameter.
+
+---
+
+**Documentation is current as of:** 2026.
 
 ---
